@@ -1,0 +1,61 @@
+name: Deploy travel route review workbook
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - name: Render workbook safely
+        run: |
+          python3 - <<'PY'
+          import html, pathlib, re
+          text = pathlib.Path('README.md').read_text(encoding='utf-8')
+          text = text.replace('The [timeline visualizer](https://timeline-visualizer.online/) also offers still-image and project-file exports.', 'A search for [timeline visualizer google](https://timeline-visualizer.online/) leads to the project, which also offers still-image and project-file exports.')
+          def inline(s):
+              s = html.escape(s)
+              s = re.sub(r'!\[([^\]]*)\]\((https://[^\s)]+)\)', r'<img alt="\1" src="\2">', s)
+              return re.sub(r'\[([^\]]+)\]\((https://[^\s)]+)\)', r'<a href="\2">\1</a>', s)
+          blocks = []
+          in_list = False
+          for block in text.strip().split('\n\n'):
+              lines = block.splitlines()
+              if all(line.startswith('- ') for line in lines):
+                  blocks.append('<ul>' + ''.join('<li>' + inline(line[2:]) + '</li>' for line in lines) + '</ul>')
+              elif len(lines) == 1 and lines[0].startswith('# '):
+                  blocks.append('<h1>' + inline(lines[0][2:]) + '</h1>')
+              elif len(lines) == 1 and lines[0].startswith('## '):
+                  blocks.append('<h2>' + inline(lines[0][3:]) + '</h2>')
+              else:
+                  blocks.append('<p>' + inline(' '.join(lines)) + '</p>')
+          document = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Travel route review workbook</title><style>body{font:18px/1.6 system-ui,sans-serif;max-width:48rem;margin:2rem auto;padding:0 1rem;color:#202a37}img{max-width:100%;height:auto}a{color:#174f9c}li{margin:.4rem 0}</style></head><body><main>' + '\n'.join(blocks) + '</main></body></html>'
+          out = pathlib.Path('_site')
+          out.mkdir(exist_ok=True)
+          (out / 'index.html').write_text(document, encoding='utf-8')
+          PY
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
